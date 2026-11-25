@@ -44,6 +44,7 @@
 #include <QSerialPortInfo>
 #include <QNetworkProxyFactory>
 #include <QNetworkInterface>
+#include <QTcpServer>
 #include <QSortFilterProxyModel>
 #include <QDesktopServices>
 #include <QProcess>
@@ -275,6 +276,15 @@ void MainWindow::setupSortByTimestampToolbarButton()
 
 MainWindow::~MainWindow()
 {
+    /* Force-abort all ECU connections (sends RST instead of FIN) so that
+     * TIME_WAIT is avoided and the ECU can reconnect immediately on next launch. */
+    for (int i = 0; i < project.ecu->topLevelItemCount(); i++)
+    {
+        EcuItem *ecuitem = static_cast<EcuItem*>(project.ecu->topLevelItem(i));
+        if (ecuitem)
+            disconnectECU(ecuitem);
+    }
+
     timer.stop(); // stop the receive timeout timer in case it is running
     dltIndexer->stop(); // in case a thread is running we want to stop it
     /**
@@ -3324,6 +3334,7 @@ void MainWindow::on_action_menuConfig_ECU_Edit_triggered()
             if((ecuitem->interfacetype != dlg.interfacetype() ||
                 ecuitem->getHostname() != dlg.hostname() ||
                 ecuitem->getIpport() != dlg.tcpport() ||
+                ecuitem->getLocalport() != dlg.localport() ||
                 ecuitem->getUdpport() != dlg.udpport() ||
                 ecuitem->getEthIF() != dlg.EthInterface() ||
                 ecuitem->getmcastIP() != dlg.mcastaddress() ||
@@ -4110,7 +4121,38 @@ void MainWindow::disconnectAll()
 
 void MainWindow::disconnectECU(EcuItem *ecuitem)
 {
-    if( true == ecuitem->tryToConnect )
+    if(ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER)
+    {
+        /* TCP Server cleanup must run regardless of tryToConnect */
+        ecuitem->tryToConnect = false;
+        ecuitem->connected = false;
+        ecuitem->connectError.clear();
+
+        /* clean up connected client socket synchronously (avoid double-free with parent delete) */
+        if(ecuitem->socket && ecuitem->socket != &ecuitem->tcpsocket)
+        {
+            disconnect(ecuitem->socket, nullptr, nullptr, nullptr);
+            ecuitem->socket->abort();
+            delete ecuitem->socket;
+        }
+        ecuitem->socket = &ecuitem->tcpsocket; /* restore default socket pointer */
+
+        /* stop and delete TCP server */
+        if(ecuitem->tcpServer)
+        {
+            if(ecuitem->tcpServer->isListening())
+                ecuitem->tcpServer->close();
+            disconnect(ecuitem->tcpServer, nullptr, nullptr, nullptr);
+            delete ecuitem->tcpServer;
+            ecuitem->tcpServer = nullptr;
+        }
+        qDebug() << "TCP Server stopped";
+
+        ecuitem->update();
+        on_configWidget_itemSelectionChanged();
+        ecuitem->InvalidAll();
+    }
+    else if( true == ecuitem->tryToConnect )
     {
         /* disconnect from host */
         ecuitem->tryToConnect = false;
@@ -4229,6 +4271,19 @@ void MainWindow::connectECU(EcuItem* ecuitem,bool force)
 #endif
                 connect(ecuitem->socket,SIGNAL(readyRead()),this,SLOT(readyRead()));
                 connect(ecuitem->socket,SIGNAL(stateChanged(QAbstractSocket::SocketState)),this,SLOT(stateChangedIP(QAbstractSocket::SocketState)));
+                /* Bind to local source port if specified (0 = OS assigns random port) */
+                if(ecuitem->getLocalport() > 0)
+                {
+                    if(!ecuitem->socket->bind(QHostAddress::Any, ecuitem->getLocalport()))
+                    {
+                        qWarning() << "Failed to bind to local port" << ecuitem->getLocalport()
+                                   << ":" << ecuitem->socket->errorString();
+                    }
+                    else
+                    {
+                        qDebug() << "Bound to local port" << ecuitem->getLocalport();
+                    }
+                }
                 ecuitem->socket->connectToHost(ecuitem->getHostname(),ecuitem->getIpport());
             }
         }
@@ -4325,6 +4380,51 @@ void MainWindow::connectECU(EcuItem* ecuitem,bool force)
                   ecuitem->connected = false;
                   ecuitem->update();
                 }
+            }
+        }
+        else if(ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER)
+        {
+            /* TCP Server - listen for incoming connections */
+            qDebug()<< "Starting TCP Server on" << ecuitem->getHostname() << ":" << ecuitem->getIpport()
+                    << QDateTime::currentDateTime().toString("hh:mm:ss");
+
+            if (!ecuitem->tcpServer)
+            {
+                ecuitem->tcpServer = new QTcpServer();
+            }
+
+            /* connect newConnection signal */
+            disconnect(ecuitem->tcpServer, nullptr, nullptr, nullptr);
+            connect(ecuitem->tcpServer, &QTcpServer::newConnection,
+                    this, &MainWindow::newTcpConnection);
+
+            /* determine listen address */
+            QHostAddress listenAddr;
+            if (ecuitem->getHostname().isEmpty() || ecuitem->getHostname() == "0.0.0.0")
+            {
+                listenAddr = QHostAddress::Any;
+            }
+            else
+            {
+                listenAddr = QHostAddress(ecuitem->getHostname());
+            }
+
+            if (ecuitem->tcpServer->listen(listenAddr, ecuitem->getIpport()))
+            {
+                qDebug() << "TCP Server listening on" << listenAddr << ":" << ecuitem->getIpport();
+                /* TCP Server receives raw DLT streams with DLS\x01 serial header */
+                ecuitem->ipcon.setSyncSerialHeader(false);
+                /* TCP Server is a passive listener - no need for reconnect loop */
+                ecuitem->tryToConnect = false;
+                ecuitem->updateAutoReconnectTimestamp();
+                ecuitem->update();
+            }
+            else
+            {
+                qDebug() << "TCP Server failed to listen:" << ecuitem->tcpServer->errorString();
+                ecuitem->connectError = ecuitem->tcpServer->errorString();
+                ecuitem->connected = false;
+                ecuitem->update();
             }
         }
         else
@@ -4480,7 +4580,7 @@ void MainWindow::disconnected()
     {
         EcuItem *ecuitem = (EcuItem*)project.ecu->topLevelItem(num);
         if( ecuitem &&
-            (ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP) &&
+            (ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER) &&
             ecuitem->socket == sender())
         {
             switch (ecuitem->interfacetype)
@@ -4490,6 +4590,13 @@ void MainWindow::disconnected()
                     break;
                case EcuItem::INTERFACETYPE_UDP:
                     qDebug() << "UDP socket closed on" << ecuitem->getEthIF() << "at" << QDateTime::currentDateTime().toString("hh:mm:ss") << GetConnectionType(ecuitem->interfacetype);
+                    break;
+               case EcuItem::INTERFACETYPE_TCP_SERVER:
+                    qDebug() << "TCP Server client disconnected at" << QDateTime::currentDateTime().toString("hh:mm:ss");
+                    /* restore default socket pointer after client disconnects */
+                    disconnect(ecuitem->socket, nullptr, nullptr, nullptr);
+                    ecuitem->socket->deleteLater();
+                    ecuitem->socket = &ecuitem->tcpsocket;
                     break;
                default:
                     break;
@@ -4502,8 +4609,9 @@ void MainWindow::disconnected()
             ecuitem->update();
             on_configWidget_itemSelectionChanged();
 
-            /* disconnect socket signals from window slots */
-            disconnect(ecuitem->socket,0,0,0);
+            /* disconnect socket signals from window slots (only for non-TCP_SERVER, already done above) */
+            if(ecuitem->interfacetype != EcuItem::INTERFACETYPE_TCP_SERVER)
+                disconnect(ecuitem->socket,0,0,0);
         }
     }
     checkConnectionState();
@@ -4537,6 +4645,26 @@ void MainWindow::timeout()
                     ecuitem->tryToConnect = true;
                     ecuitem->connected = false;
                 }
+                else if((ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER)
+                        && ecuitem->autoReconnect && ecuitem->connected != 0
+                        && ecuitem->totalBytesRcvd == static_cast<unsigned long>(ecuitem->totalBytesRcvdLastTimeout))
+                {
+                    qDebug() << "TCP Server client idle timeout for" << ecuitem->getHostname()
+                             << "totalBytesRcvd=" << ecuitem->totalBytesRcvd
+                             << "lastTimeout=" << ecuitem->totalBytesRcvdLastTimeout;
+                    /* Only disconnect the client, keep server listening */
+                    if(ecuitem->socket && ecuitem->socket != &ecuitem->tcpsocket)
+                    {
+                        disconnect(ecuitem->socket, nullptr, nullptr, nullptr);
+                        ecuitem->socket->disconnectFromHost();
+                        ecuitem->socket->deleteLater();
+                    }
+                    ecuitem->socket = &ecuitem->tcpsocket;
+                    ecuitem->connected = false;
+                    ecuitem->totalBytesRcvd = 0;
+                    ecuitem->totalBytesRcvdLastTimeout = 0;
+                    ecuitem->update();
+                }
 
                 ecuitem->totalBytesRcvdLastTimeout = ecuitem->totalBytesRcvd;
                 dltIndexer->unlock();
@@ -4549,6 +4677,11 @@ void MainWindow::timeout()
                 {
                 qDebug() << "TCP reconnect timeout for" << ecuitem->getHostname();
                 connectECU(ecuitem,true);
+                }
+                else if( ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER )
+                {
+                    /* TCP Server is passive - no reconnect needed, just wait for client */
+                    ecuitem->tryToConnect = false;
                 }
                 else if( ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP )
                 {
@@ -4568,14 +4701,26 @@ void MainWindow::error(QAbstractSocket::SocketError /* socketError */)
     {
         EcuItem *ecuitem = (EcuItem*)project.ecu->topLevelItem(num);
         if( ecuitem &&
-            (ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP) &&
+            (ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER) &&
             ecuitem->socket == sender())
         {
             /* save error */
             ecuitem->connectError = ecuitem->socket->errorString();
             qDebug() << "Socket connection error" << ecuitem->socket->errorString() << "for" << ecuitem->getHostname() << "on" << ecuitem->getIpport();// << __LINE__ << __FILE__;
-            /* disconnect socket */
-            ecuitem->socket->disconnectFromHost();
+
+            if(ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER)
+            {
+                /* TCP Server: clean up client socket BEFORE update() resets the pointer */
+                disconnect(ecuitem->socket, nullptr, nullptr, nullptr);
+                ecuitem->socket->abort();
+                ecuitem->socket->deleteLater();
+                ecuitem->socket = &ecuitem->tcpsocket;
+            }
+            else
+            {
+                /* TCP or UDP client */
+                ecuitem->socket->disconnectFromHost();
+            }
 
             /* update connection state */
             ecuitem->connected = false;
@@ -4584,6 +4729,76 @@ void MainWindow::error(QAbstractSocket::SocketError /* socketError */)
             on_configWidget_itemSelectionChanged();
         }
 
+    }
+}
+
+void MainWindow::newTcpConnection()
+{
+    /* signal emitted when a new client connects to the TCP server */
+    QTcpServer *server = qobject_cast<QTcpServer*>(sender());
+    if (!server)
+        return;
+
+    for(int num = 0; num < project.ecu->topLevelItemCount(); num++)
+    {
+        EcuItem *ecuitem = (EcuItem*)project.ecu->topLevelItem(num);
+        if(ecuitem && ecuitem->tcpServer == server)
+        {
+            if(ecuitem->connected)
+            {
+                /* already have a client connected, reject new connection (single client only) */
+                QTcpSocket *rejected = server->nextPendingConnection();
+                if (rejected)
+                {
+                    qDebug() << "TCP Server: rejecting additional connection from"
+                             << rejected->peerAddress().toString();
+                    rejected->abort();
+                    rejected->deleteLater();
+                }
+                return;
+            }
+
+            QTcpSocket *clientSocket = server->nextPendingConnection();
+            if (!clientSocket)
+                return;
+
+            qDebug() << "TCP Server: new connection from"
+                     << clientSocket->peerAddress().toString()
+                     << ":" << clientSocket->peerPort();
+
+            /* use the accepted socket as the active socket for this ECU */
+            ecuitem->socket = clientSocket;
+
+            /* connect socket signals with window slots */
+            connect(clientSocket, SIGNAL(disconnected()), this, SLOT(disconnected()));
+#if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+            connect(clientSocket, SIGNAL(error(QAbstractSocket::SocketError)), this, SLOT(error(QAbstractSocket::SocketError)));
+#else
+            connect(clientSocket, &QAbstractSocket::errorOccurred, this, &MainWindow::error);
+#endif
+            connect(clientSocket, SIGNAL(readyRead()), this, SLOT(readyRead()));
+            connect(clientSocket, SIGNAL(stateChanged(QAbstractSocket::SocketState)), this, SLOT(stateChangedIP(QAbstractSocket::SocketState)));
+
+            /* update connection state */
+            ecuitem->connected = true;
+            ecuitem->connectError.clear();
+            ecuitem->totalBytesRcvd = 0;
+            ecuitem->totalBytesRcvdLastTimeout = 0;
+            ecuitem->ipcon.clear();
+            ecuitem->update();
+            on_configWidget_itemSelectionChanged();
+
+            /* send initial updates if configured */
+            if (ecuitem->updateDataIfOnline)
+            {
+                sendUpdates(ecuitem);
+            }
+
+            pluginManager.stateChanged(num, QDltConnection::QDltConnectionOnline,
+                                       clientSocket->peerAddress().toString());
+            checkConnectionState();
+            return;
+        }
     }
 }
 
@@ -4686,7 +4901,8 @@ void MainWindow::read(EcuItem* ecuitem)
     switch (ecuitem->interfacetype)
      {
       case EcuItem::INTERFACETYPE_TCP:
-          /* TCP */
+      case EcuItem::INTERFACETYPE_TCP_SERVER:
+          /* TCP or TCP Server */
           data = ecuitem->socket->readAll();
           bytesRcvd = data.size();
           //qDebug() << "bytes received" << bytesRcvd;
@@ -4784,7 +5000,7 @@ void MainWindow::read(EcuItem* ecuitem)
     /* reading data; new data is added to the current buffer */
      ecuitem->totalBytesRcvd += bytesRcvd;
 
-     while(((ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP) && ecuitem->ipcon.parseDlt(qmsg,settings->supportDLTv2Decoding)) ||
+     while(((ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER) && ecuitem->ipcon.parseDlt(qmsg,settings->supportDLTv2Decoding)) ||
             (ecuitem->interfacetype == EcuItem::INTERFACETYPE_SERIAL_DLT && ecuitem->serialcon.parseDlt(qmsg,settings->supportDLTv2Decoding)) ||
             (ecuitem->interfacetype == EcuItem::INTERFACETYPE_SERIAL_ASCII && ecuitem->serialcon.parseAscii(qmsg)) )
         {
@@ -4826,7 +5042,7 @@ void MainWindow::read(EcuItem* ecuitem)
 
         } //end while
 
-     if(ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP)
+     if(ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER)
         {
             /* TCP or UDP */
             totalByteErrorsRcvd+=ecuitem->ipcon.bytesError;
@@ -5227,7 +5443,7 @@ void MainWindow::controlMessage_SendControlMessage(EcuItem* ecuitem,DltMessage &
     msg.standardheader->len = DLT_HTOBE_16(msg.headersize - sizeof(DltStorageHeader) + msg.datasize);
 
     /* send message to daemon */
-    if ((ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP) && ecuitem->socket->isOpen())
+    if ((ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_UDP || ecuitem->interfacetype == EcuItem::INTERFACETYPE_TCP_SERVER) && ecuitem->socket->isOpen())
     {
         QByteArray tmpBuf;
 
@@ -8706,6 +8922,9 @@ QString MainWindow::GetConnectionType(int iTypeNumber)
        break;
    case EcuItem::INTERFACETYPE_SERIAL_ASCII:
        port=QString("Serial ASCII");
+       break;
+   case EcuItem::INTERFACETYPE_TCP_SERVER:
+       port=QString("TCP Server");
        break;
    default:
        port=QString("UNDEFINED");

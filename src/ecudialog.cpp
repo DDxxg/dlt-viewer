@@ -94,6 +94,7 @@ void EcuDialog::setData(EcuItem &item)
     ui->comboBoxInterface->setCurrentIndex(item.interfacetype);
     ui->comboBoxHostname->setEditText(item.getHostname());
     ui->comboBoxPortIP->setEditText(QString("%1").arg(item.getIpport()));
+    ui->comboBoxLocalPort->setEditText(QString("%1").arg(item.getLocalport()));
     ui->comboBoxPortIP_UDP->setEditText(QString("%1").arg(item.getUdpport()));
     ui->comboBoxNetworkIF->setEditText(QString("%1").arg(item.getEthIF()));
     ui->comboBoxPortSerial->setEditText(item.getPort());
@@ -178,6 +179,9 @@ unsigned int EcuDialog::port()
       case EcuItem::INTERFACETYPE_UDP:
            return  ui->comboBoxPortIP_UDP->currentText().toUInt();
            break;
+      case EcuItem::INTERFACETYPE_TCP_SERVER:
+           return  ui->comboBoxPortIP->currentText().toUInt();
+           break;
      default:
         break;
     }
@@ -187,6 +191,11 @@ unsigned int EcuDialog::port()
 unsigned int EcuDialog::tcpport()
 {
     return  ui->comboBoxPortIP->currentText().toUInt();
+}
+
+unsigned int EcuDialog::localport()
+{
+    return  ui->comboBoxLocalPort->currentText().toUInt();
 }
 
 unsigned int EcuDialog::udpport()
@@ -329,6 +338,7 @@ void EcuDialog::setDialogToEcuItem(EcuItem *item)
     item->interfacetype = this->interfacetype();
     item->setHostname(this->hostname());
     item->setIpport(this->tcpport());
+    item->setLocalport(this->localport());
     item->setUdpport(this->udpport());
     item->setEthIF(this->EthInterface());
     item->setmcastIP(this->mcastaddress());
@@ -387,6 +397,8 @@ void EcuDialog::on_comboBoxInterface_currentIndexChanged(int index)
             ui->checkBoxMulticast->setVisible(false);
             ui->label_3->setText(QString("Hostname:"));
             ui->label_3->setToolTip(QString("Name or IP address of server to connect to."));
+            ui->label_LocalPort->setVisible(true);
+            ui->comboBoxLocalPort->setVisible(true);
         break;
 
         case EcuItem::INTERFACETYPE_UDP:
@@ -416,6 +428,19 @@ void EcuDialog::on_comboBoxInterface_currentIndexChanged(int index)
             ui->checkBoxSendSerialHeaderSerial->setVisible(false);
             ui->checkBoxSyncToSerialHeaderSerial->setVisible(false);
             break;
+
+        case EcuItem::INTERFACETYPE_TCP_SERVER:
+            //we have TCP Server set -> disable serial, enable TCP tab for listen config
+            ui->tabWidget->setTabEnabled(1,true);
+            ui->tabWidget->setTabEnabled(2,false);
+            ui->tabWidget->setTabEnabled(3,false);
+            ui->comboBoxNetworkIF->setVisible(false);
+            ui->checkBoxMulticast->setVisible(false);
+            ui->label_LocalPort->setVisible(false);
+            ui->comboBoxLocalPort->setVisible(false);
+            ui->label_3->setText(QString("Listen Address:"));
+            ui->label_3->setToolTip(QString("Local IP address to listen on.\nUse 0.0.0.0 or leave empty to listen on all interfaces."));
+        break;
 
     }
 }

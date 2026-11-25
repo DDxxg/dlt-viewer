@@ -43,6 +43,7 @@ public:
     QString serialPort();
     unsigned int port();
     unsigned int tcpport();
+    unsigned int localport();
     unsigned int udpport();
     QString EthInterface();
     QSerialPort::BaudRate baudrate();

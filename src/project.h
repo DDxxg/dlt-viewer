@@ -30,6 +30,7 @@
 #include <QTreeWidget>
 #include <QDockWidget>
 #include <QTcpSocket>
+#include <QTcpServer>
 #include <QUdpSocket>
 #include <QObject>
 #include <QDateTime>
@@ -51,7 +52,8 @@ public:
         INTERFACETYPE_TCP,
         INTERFACETYPE_UDP,
         INTERFACETYPE_SERIAL_DLT,
-        INTERFACETYPE_SERIAL_ASCII
+        INTERFACETYPE_SERIAL_ASCII,
+        INTERFACETYPE_TCP_SERVER
     };
 
     EcuItem(QTreeWidgetItem *parent = 0);
@@ -81,6 +83,9 @@ public:
     QTcpSocket tcpsocket;
     QUdpSocket udpsocket;
     QAbstractSocket * socket;
+
+    /* TCP Server */
+    QTcpServer *tcpServer = nullptr;
 
     QSerialPort *m_serialport;
 
@@ -113,6 +118,7 @@ private:
      QString ethIF; /* needed for UDP multicast, identify interface via IP address */
      unsigned int ipport;
      unsigned int udpport; /*basically the same*/
+     unsigned int localport; /* local source port for TCP client (0 = OS assigns random) */
      bool sendSerialHeaderIp;
      bool syncSerialHeaderIp;
      bool writeDLTv2StorageHeader;
@@ -126,12 +132,14 @@ public:
      QString getEthIF() {return ethIF;}
      unsigned int getIpport() {return ipport;}
      unsigned int getUdpport() {return udpport;}
+     unsigned int getLocalport() {return localport;}
      bool getSendSerialHeaderIp() {return sendSerialHeaderIp;}
      bool getSyncSerialHeaderIp() {return syncSerialHeaderIp;}
 
      void setHostname(QString hname) {hostname = hname; ipcon.setHostname(hostname);}
      void setIpport(unsigned int tp) {ipport = tp; ipcon.setPort(ipport);}
      void setUdpport(unsigned int tp) {udpport = tp; ipcon.setPort(udpport);}
+     void setLocalport(unsigned int tp) {localport = tp;}
      void setEthIF(QString ethif) {ethIF = ethif;}
      void setmcastIP(QString mcastip) {mcastIP = mcastip;}
      void setSendSerialHeaderIp(bool b) {sendSerialHeaderIp = b; ipcon.setSendSerialHeader(sendSerialHeaderIp);}
