@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "name": "Strict no-error policy - requires business confirmation",
+  "min_messages": 1,
+  "require_decoded": true,
+  "rules": [
+    {"name": "Application logs available", "match": {"type": "log", "ecu": "ECU1"}, "min_count": 1},
+    {"name": "No fatal or error logs", "match": {"type": "log", "max_level": "error"}, "max_count": 0}
+  ]
+}

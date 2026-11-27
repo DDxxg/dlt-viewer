@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "Decoder acceptance only - NOT ECU software acceptance",
+  "min_messages": 1,
+  "require_decoded": true,
+  "rules": [
+    {"name": "Application logs available", "match": {"type": "log", "ecu": "ECU1"}, "min_count": 1},
+    {"name": "SYS0 context available", "match": {"type": "log", "apid": "SYS0", "ctid": "SYS0"}, "min_count": 1},
+    {"name": "SYS2 context available", "match": {"type": "log", "apid": "SYS2", "ctid": "SYS2"}, "min_count": 1},
+    {"name": "Known U16 test text decoded", "match": {"type": "log", "apid": "SYS0", "contains": "TEST_SEQ_U16"}, "min_count": 1},
+    {"name": "Control response metadata retained", "match": {"type": "control"}, "min_count": 1}
+  ]
+}

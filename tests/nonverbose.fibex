@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fx:FIBEX xmlns:fx="http://www.asam.net/xml/fbx" xmlns:ho="http://www.asam.net/xml" VERSION="3.1.1">
+  <fx:PROJECT ID="TEST"><ho:SHORT-NAME>CLI test</ho:SHORT-NAME></fx:PROJECT>
+  <fx:ELEMENTS>
+    <fx:FRAMES>
+      <fx:FRAME ID="ID_1234">
+        <ho:SHORT-NAME>TEST_VALUE</ho:SHORT-NAME>
+        <fx:BYTE-LENGTH>2</fx:BYTE-LENGTH><fx:FRAME-TYPE>OTHER</fx:FRAME-TYPE>
+        <fx:PDU-INSTANCES>
+          <fx:PDU-INSTANCE ID="I_0"><fx:PDU-REF ID-REF="P_0"/><fx:SEQUENCE-NUMBER>0</fx:SEQUENCE-NUMBER></fx:PDU-INSTANCE>
+          <fx:PDU-INSTANCE ID="I_1"><fx:PDU-REF ID-REF="P_1"/><fx:SEQUENCE-NUMBER>1</fx:SEQUENCE-NUMBER></fx:PDU-INSTANCE>
+        </fx:PDU-INSTANCES>
+        <fx:MANUFACTURER-EXTENSION>
+          <MESSAGE_TYPE>DLT_TYPE_LOG</MESSAGE_TYPE><MESSAGE_INFO>DLT_LOG_INFO</MESSAGE_INFO>
+          <APPLICATION_ID>TEST</APPLICATION_ID><CONTEXT_ID>MAIN</CONTEXT_ID>
+        </fx:MANUFACTURER-EXTENSION>
+      </fx:FRAME>
+    </fx:FRAMES>
+    <fx:PDUS>
+      <fx:PDU ID="P_0"><ho:SHORT-NAME/><ho:DESC>value=</ho:DESC><fx:BYTE-LENGTH>0</fx:BYTE-LENGTH><fx:PDU-TYPE>OTHER</fx:PDU-TYPE></fx:PDU>
+      <fx:PDU ID="P_1">
+        <ho:SHORT-NAME>value</ho:SHORT-NAME><fx:BYTE-LENGTH>2</fx:BYTE-LENGTH><fx:PDU-TYPE>OTHER</fx:PDU-TYPE>
+        <fx:SIGNAL-INSTANCES><fx:SIGNAL-INSTANCE ID="S_1"><fx:SEQUENCE-NUMBER>0</fx:SEQUENCE-NUMBER><fx:SIGNAL-REF ID-REF="S_UINT16"/></fx:SIGNAL-INSTANCE></fx:SIGNAL-INSTANCES>
+      </fx:PDU>
+    </fx:PDUS>
+  </fx:ELEMENTS>
+</fx:FIBEX>

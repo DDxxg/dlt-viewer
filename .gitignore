@@ -1,3 +1,5 @@
+# Upstream DLT Viewer rules, retained alongside the local adapter rules.
+# Source: https://raw.githubusercontent.com/COVESA/dlt-viewer/master/.gitignore
 .gitconfig
 CMakeLists.txt.user
 build/
@@ -15,3 +17,20 @@ compile_commands.json
 # deb packaging directories
 debian/
 debtmp/
+# Other IDE user-specific files must remain local too.
+*.user
+
+# Python adapter-generated files.
+__pycache__/
+*.py[cod]
+.dlt-ai-*
+examples/demo-output/
+
+# Private logs/databases and derived evidence MUST NOT be committed.
+# Ignore the whole output tree, not just its largest JSONL file.
+artifacts/
+*.dlt
+*.jsonl
+*.fibex
+# This tiny, independently authored synthetic test database is source.
+!tests/nonverbose.fibex

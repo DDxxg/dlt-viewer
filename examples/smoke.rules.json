@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "ECU boot smoke test",
+  "min_messages": 2,
+  "require_decoded": true,
+  "rules": [
+    {
+      "name": "Boot completed",
+      "match": {"apid": "TEST", "ctid": "MAIN", "contains": "BOOT_OK"},
+      "min_count": 1
+    },
+    {
+      "name": "Test completed",
+      "match": {"apid": "TEST", "contains": "TEST_DONE"},
+      "min_count": 1
+    },
+    {
+      "name": "No fatal or error messages",
+      "match": {"type": "log", "max_level": "error"},
+      "max_count": 0
+    }
+  ]
+}

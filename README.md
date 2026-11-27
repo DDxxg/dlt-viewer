@@ -2,6 +2,23 @@
 
 # Diagnostic Log and Trace Viewer
 
+## Local AI CLI adapter
+
+This distribution includes an additional, non-GUI Python 3.10+ adapter for
+UTF-8 JSONL export, filtering, summaries, deterministic test assertions and
+bounded DLTv1 TCP capture/test workflows. The original binaries are unchanged.
+Start with `dlt-cli.ps1 doctor` and see [CLI_GUIDE.md](CLI_GUIDE.md) for the
+Chinese usage guide, examples, exit-code contract and verified limitations.
+
++ **Human quick start:** [QUICK_START.md](QUICK_START.md)
++ **AI agent operating contract:** [AI_AGENT_GUIDE.md](AI_AGENT_GUIDE.md)
++ **Workspace agent instructions:** [AGENTS.md](AGENTS.md)
++ **Local data / submission policy:** [DATA_HANDLING.md](DATA_HANDLING.md)
+
+Real logs, databases and generated reports are local-only and are not part of
+the source package. `doctor` verifies a synthetic UTF-8 export rather than native
+help output; some Windows releases produce no capturable help text.
+
 ## Overview
 
 The Diagnostic Log and Trace Viewer is an application that can send and receive control messages to the DLT daemon, e.g. to set individual log levels of applications and contexts or get the list of applications and contexts registered in the DLT daemon. DLT viewer is based on Qt for Windows and Linux and can run on the Mac though that is not officially supported.
